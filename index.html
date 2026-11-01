@@ -121,6 +121,22 @@ function speak(t){
 function after(){if(conv&&!busy&&!listening)setTimeout(listen,400);}
 
 /* ---- ask Gemini ---- */
+let gList=null;
+async function groqPick(needVision){
+  if(!gList){
+    try{
+      const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{'Authorization':'Bearer '+key}});
+      const j=await r.json();
+      gList=(j.data||[]).map(m=>m.id).filter(id=>!/whisper|guard|tts|orpheus|safeguard|embed/i.test(id));
+    }catch(e){gList=[];}
+  }
+  if(!gList.length)return needVision?['meta-llama/llama-4-scout-17b-16e-instruct']:['groq/compound','openai/gpt-oss-120b','llama-3.3-70b-versatile'];
+  if(needVision){const v=gList.filter(id=>/scout|maverick|vision/i.test(id));return v.length?v:gList.slice(0,3);}
+  const pref=['openai/gpt-oss-120b','llama-3.3-70b-versatile','openai/gpt-oss-20b','llama-3.1-8b-instant','qwen/qwen3-32b'];
+  const comp=gList.filter(id=>/compound/i.test(id)).sort((a,b)=>a.includes('mini')-b.includes('mini'));
+  const txt=pref.filter(id=>gList.includes(id)).concat(gList.filter(id=>!pref.includes(id)&&!/compound|scout|maverick|vision/i.test(id)));
+  return comp.slice(0,1).concat(txt.slice(0,3));
+}
 async function ask(q){
   if(!key){pane('pKey');add('sys','API key தேவை.');return;}
   if(busy)return;busy=true;
@@ -130,7 +146,7 @@ async function ask(q){
   history.push({role:'user',parts});
   const wait=add('ai','…');let err='';
   const isG=key.startsWith('gsk_');
-  const tries=isG?(img?['meta-llama/llama-4-scout-17b-16e-instruct']:['groq/compound','llama-3.3-70b-versatile']):['gemini-2.5-flash','gemini-2.0-flash'];
+  const tries=isG?await groqPick(!!img):['gemini-2.5-flash','gemini-2.0-flash'];
   for(let i=0;i<tries.length;i++){
     try{
       let raw='';
@@ -153,7 +169,7 @@ async function ask(q){
         if(!r.ok){err=(j.error&&j.error.message)||('Error '+r.status);continue;}
         raw=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts||[]).map(p=>p.text||'').join('');
       }
-      raw=raw||'பதில் கிடைக்கவில்லை.';
+      raw=(raw||'').replace(/<think>[\s\S]*?<\/think>/g,'').trim()||'பதில் கிடைக்கவில்லை.';
       history.push({role:'model',parts:[{text:raw}]});
       history.forEach((h,idx)=>{if(idx<history.length-2)h.parts=h.parts.map(p=>p.inlineData?{text:'(photo)'}:p);});
       const clean=(actions(raw)||'சரி.').replace(/\*\*|\*|^#+ /gm,'');
@@ -194,7 +210,7 @@ $('bKey').onclick=()=>pane('pKey');
 $('bNotes').onclick=()=>{renderLists();pane('pNotes');};
 $('bVoice').onclick=()=>{voiceOn=!voiceOn;$('bVoice').textContent=voiceOn?'🔊':'🔇';if(!voiceOn)speechSynthesis.cancel();};
 $('bConv').onclick=()=>{conv=!conv;$('bConv').classList.toggle('act',conv);add('sys',conv?'தொடர் உரையாடல் ON: நீங்க பேசி முடிச்சதும் JARVIS பதில் சொல்லி மறுபடி கேட்கும்.':'தொடர் உரையாடல் OFF');if(conv)listen();};
-$('save').onclick=()=>{key=$('key').value.trim();ls.set('jv_key',key);$('key').value='';$('pKey').classList.remove('show');add('sys','Key சேமிக்கப்பட்டது. இப்போ பேசலாம்.');};
+$('save').onclick=()=>{gList=null;key=$('key').value.trim();ls.set('jv_key',key);$('key').value='';$('pKey').classList.remove('show');add('sys','Key சேமிக்கப்பட்டது. இப்போ பேசலாம்.');};
 $('send').onclick=send;
 $('txt').addEventListener('keydown',e=>{if(e.key==='Enter')send();});
 
